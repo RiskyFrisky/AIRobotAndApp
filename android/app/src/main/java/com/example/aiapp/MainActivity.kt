@@ -1,13 +1,17 @@
 package com.example.aiapp
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.media.AudioManager
 import android.os.Bundle
 import android.util.Base64
 import android.widget.Button
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,23 +22,25 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.aiapp.ui.theme.AIAppTheme
 import com.microsoft.cognitiveservices.speech.Connection
 import com.microsoft.cognitiveservices.speech.SpeechConfig
 import com.microsoft.cognitiveservices.speech.SpeechSynthesisCancellationDetails
 import com.microsoft.cognitiveservices.speech.SpeechSynthesisEventArgs
 import com.microsoft.cognitiveservices.speech.SpeechSynthesizer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONException
 import org.json.JSONObject
 import org.webrtc.AudioTrack
@@ -118,16 +124,40 @@ class MainActivity : ComponentActivity() {
     private var frameListener: EglRenderer.FrameListener? = null
 
     data class MainActivityState(
-        val sessionState: SessionState = SessionState.DISCONNECTED,
+        val openaiSessionState: OpenAIState = OpenAIState.DISCONNECTED,
+        val avatarSessionState: SessionState = SessionState.DISCONNECTED,
         val isSpeaking: Boolean = false
     )
     private val state = MutableStateFlow(MainActivityState())
+
+    private val audioInput = AudioInput()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             AIAppTheme {
+                val permissionResultLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission(),
+                    onResult = { isGranted ->
+                        if (isGranted) {
+                            audioInput.startRecording()
+                        }
+                    }
+                )
+
+                LaunchedEffect(Unit) {
+                    if (ActivityCompat.checkSelfPermission(
+                            this@MainActivity,
+                            Manifest.permission.RECORD_AUDIO
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        permissionResultLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    } else {
+                        audioInput.startRecording()
+                    }
+                }
+
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Box(
                         modifier = Modifier
@@ -144,8 +174,6 @@ class MainActivity : ComponentActivity() {
                                 initializePeerConnectionFactory()
                             },
                             onStartSessionButtonClicked = ::onStartSessionButtonClicked,
-                            onSpeakButtonClicked = ::onSpeakButtonClicked,
-                            onStopSpeakingButtonClicked = ::onStopSpeakingButtonClicked,
                             onStopSessionButtonClicked = ::onStopSessionButtonClicked
                         )
                     }
@@ -153,9 +181,39 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Switch audio output device from earphone to speaker, for louder volume.
         val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
-        audioManager.isSpeakerphoneOn = true
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION // will make sound bar show for phone instead of media, but will activate echo cancellation
+        audioManager.isSpeakerphoneOn = true // Switch audio output device from earphone to speaker, for louder volume.
+
+
+        val openai = OpenAI()
+        lifecycleScope.launch(Dispatchers.IO) {
+            openai.startWebsocket(
+                onSessionState = { newState ->
+                    state.value = state.value.copy(openaiSessionState = newState)
+                },
+                onUserTalking = {
+                    // stop talking
+                    onStopSpeakingButtonClicked()
+                },
+                onBotResponse = { response ->
+                    // start talking
+                    onSpeakButtonClicked(response)
+                }
+            )
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            while(true) {
+                val base64Data = audioInput.read()
+                if (base64Data != null) {
+                    if (state.value.avatarSessionState == SessionState.CONNECTED && state.value.openaiSessionState == OpenAIState.CONNECTED) {
+//                        Timber.i("Sending audio data to OpenAI: ${base64Data}")
+                        openai.sendInputAudioToWebsocket(base64Data)
+                    }
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -178,7 +236,7 @@ class MainActivity : ComponentActivity() {
 
     @Throws(URISyntaxException::class)
     fun onStartSessionButtonClicked() {
-        state.value = state.value.copy(sessionState = SessionState.CONNECTING)
+        state.value = state.value.copy(avatarSessionState = SessionState.CONNECTING)
 
         if (synthesizer != null) {
             speechConfig!!.close()
@@ -195,22 +253,25 @@ class MainActivity : ComponentActivity() {
     }
 
     @Throws(ExecutionException::class, InterruptedException::class)
-    fun onSpeakButtonClicked() {
+    fun onSpeakButtonClicked(text: String) {
         if (synthesizer == null) {
             updateOutputMessage("Please start the avatar session first", true, true)
             return
         }
 
+        onStopSpeakingButtonClicked()
+
         state.value = state.value.copy(isSpeaking = true)
 
-        val spokenText = "Hello, I am a talking avatar. How can I help you?"
-        synthesizer!!.SpeakTextAsync(spokenText)
+        synthesizer!!.SpeakTextAsync(text)
     }
 
     fun onStopSpeakingButtonClicked() {
-        state.value = state.value.copy(isSpeaking = false)
+        if (state.value.isSpeaking) {
+            connection!!.sendMessageAsync("synthesis.control", "{\"action\":\"stop\"}")
+        }
 
-        connection!!.sendMessageAsync("synthesis.control", "{\"action\":\"stop\"}")
+        state.value = state.value.copy(isSpeaking = false)
     }
 
     fun onStopSessionButtonClicked() {
@@ -253,7 +314,7 @@ class MainActivity : ComponentActivity() {
         frameListener = EglRenderer.FrameListener { bitmap: Bitmap? ->
 //            setVideoRendererVisibility(true)
             synthesizer!!.SynthesisStarted.addEventListener { o: Any?, e: SpeechSynthesisEventArgs ->
-                state.value = state.value.copy(sessionState = SessionState.CONNECTED)
+                state.value = state.value.copy(isSpeaking = true)
                 e.close()
             }
             synthesizer!!.SynthesisCompleted.addEventListener { o: Any?, e: SpeechSynthesisEventArgs ->
@@ -363,11 +424,11 @@ class MainActivity : ComponentActivity() {
                     true
                 )
                 if (iceConnectionState == IceConnectionState.CONNECTED) {
-                    state.value = state.value.copy(sessionState = SessionState.CONNECTED)
+                    state.value = state.value.copy(avatarSessionState = SessionState.CONNECTED)
                 } else if (iceConnectionState == IceConnectionState.DISCONNECTED || iceConnectionState == IceConnectionState.FAILED) {
 //                    setVideoRendererVisibility(false)
                     state.value = state.value.copy(
-                        sessionState = SessionState.DISCONNECTED,
+                        avatarSessionState = SessionState.DISCONNECTED,
                         isSpeaking = false
                     )
                 }
@@ -682,8 +743,6 @@ fun Content(
     state: MainActivity.MainActivityState,
     onVideoRendererCreated: (SurfaceViewRenderer) -> Unit,
     onStartSessionButtonClicked: () -> Unit,
-    onSpeakButtonClicked: () -> Unit,
-    onStopSpeakingButtonClicked: () -> Unit,
     onStopSessionButtonClicked: () -> Unit
 ) {
     val context = LocalContext.current
@@ -691,34 +750,21 @@ fun Content(
     Column {
         Button(
             onClick = {
-                when (state.sessionState) {
+                when (state.avatarSessionState) {
                     SessionState.DISCONNECTED -> onStartSessionButtonClicked()
                     SessionState.CONNECTING -> onStopSessionButtonClicked()
                     SessionState.CONNECTED -> onStopSessionButtonClicked()
                 }
             }
         ) {
-            Text(text = when (state.sessionState) {
+            Text(text = when (state.avatarSessionState) {
                 SessionState.DISCONNECTED -> "Start Session"
                 SessionState.CONNECTING -> "Connecting..."
                 SessionState.CONNECTED -> "Stop Session"
             })
         }
 
-        Button(
-            onClick = {
-                if (state.isSpeaking) {
-                    onStopSpeakingButtonClicked()
-                } else {
-                    onSpeakButtonClicked()
-                }
-            }
-        ) {
-            Text(text = when (state.isSpeaking) {
-                true -> "Stop Speaking"
-                false -> "Speak"
-            })
-        }
+        Text("AI: ${state.openaiSessionState}")
 
         AndroidView(
             modifier = Modifier
@@ -741,8 +787,6 @@ fun ContentPreview() {
             state = MainActivity.MainActivityState(),
             onVideoRendererCreated = {},
             onStartSessionButtonClicked = {},
-            onSpeakButtonClicked = {},
-            onStopSpeakingButtonClicked = {},
             onStopSessionButtonClicked = {}
         )
     }
