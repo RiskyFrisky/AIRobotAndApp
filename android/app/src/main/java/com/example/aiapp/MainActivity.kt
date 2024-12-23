@@ -1,31 +1,51 @@
 package com.example.aiapp
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.media.AudioManager
+import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
+import android.webkit.WebView
 import android.widget.Button
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -83,6 +103,7 @@ import java.util.Arrays
 import java.util.concurrent.ExecutionException
 import java.util.regex.Pattern
 
+
 enum class SessionState {
     DISCONNECTED, CONNECTING, CONNECTED
 }
@@ -123,27 +144,38 @@ class MainActivity : ComponentActivity() {
     private var videoRenderer: SurfaceViewRenderer? = null
     private var frameListener: EglRenderer.FrameListener? = null
 
+    companion object {
+        private var loaded = false
+    }
+
     data class MainActivityState(
+        val enableAzure: Boolean = false,
         val openaiSessionState: OpenAIState = OpenAIState.DISCONNECTED,
         val avatarSessionState: SessionState = SessionState.DISCONNECTED,
-        val isSpeaking: Boolean = false
+        val isSpeaking: Boolean = false,
+        val aiResponseText: String = ""
     )
     private val state = MutableStateFlow(MainActivityState())
 
     private val audioInput = AudioInput()
+    private val openai = OpenAI()
 
+    private var webView: WebView? = null
+
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             AIAppTheme {
+//                var backEnabled by remember { mutableStateOf(false) }
+//                BackHandler(enabled = true) {
+//                    webView?.goBack()
+//                }
+
                 val permissionResultLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission(),
-                    onResult = { isGranted ->
-                        if (isGranted) {
-                            audioInput.startRecording()
-                        }
-                    }
+                    onResult = {}
                 )
 
                 LaunchedEffect(Unit) {
@@ -153,29 +185,271 @@ class MainActivity : ComponentActivity() {
                         ) != PackageManager.PERMISSION_GRANTED
                     ) {
                         permissionResultLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    } else {
-                        audioInput.startRecording()
                     }
                 }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+                    val scope = rememberCoroutineScope()
+
                     Box(
                         modifier = Modifier
                             .padding(innerPadding)
                             .fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectHorizontalDragGestures(
+                                    onDragStart = { offset ->
+                                        // Check if the gesture started near the edge of the screen
+                                        if (offset.x < 100f && drawerState.isClosed) {
+                                            scope.launch { drawerState.open() }
+                                        }
+                                    },
+                                    onDragEnd = {
+                                        // Optional: Close the drawer if needed
+                                        if (drawerState.isOpen) {
+                                            scope.launch { drawerState.close() }
+                                        }
+                                    },
+                                    onDragCancel = {},
+                                    onHorizontalDrag = { _, _ -> }
+                                )
+                            }
                     ) {
                         val state by state.collectAsState()
 
-                        Content(
-                            state = state,
-                            onVideoRendererCreated = {
-                                Timber.i("Video renderer created")
-                                videoRenderer = it
-                                initializePeerConnectionFactory()
+                        ModalNavigationDrawer(
+                            drawerState = drawerState,
+                            drawerContent = {
+                                ModalDrawerSheet {
+                                    AIBotContent(
+                                        state = state,
+                                        onAzureEnabledToggle = {
+                                            this@MainActivity.state.value = state.copy(enableAzure = it)
+                                        },
+                                        onVideoRendererCreated = {
+                                            Timber.i("Video renderer created")
+                                            videoRenderer = it
+                                            initializePeerConnectionFactory()
+                                        },
+                                        onStartSessionButtonClicked = ::onStartSessionButtonClicked,
+                                        onStopSessionButtonClicked = ::onStopSessionButtonClicked
+                                    )
+                                }
                             },
-                            onStartSessionButtonClicked = ::onStartSessionButtonClicked,
-                            onStopSessionButtonClicked = ::onStopSessionButtonClicked
-                        )
+                            gesturesEnabled = false
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Button(
+                                    onClick = ::openWebsite
+                                ) {
+                                    Text("Open Foxglove")
+                                }
+                            }
+
+//                            // Remember the WebView instance across recompositions
+//                            val context = LocalContext.current
+//                            val webView = remember { WebView(context) }
+//                            var loaded by remember { mutableStateOf(false) }
+
+//                            PullToRefresh(
+//                                onRefresh = { onComplete ->
+//                                    loaded = false
+//                                    webView.loadUrl(webViewUrl)
+//                                    lifecycleScope.launch(Dispatchers.IO) {
+//                                        while (!loaded) {
+//                                            delay(100)
+//                                        }
+//                                        onComplete()
+//                                    }
+//                                }
+//                            ) {
+//                                LazyColumn(
+//                                    modifier = Modifier
+//                                        .fillMaxSize(),
+//                                ) {
+//                                    item {
+//                                        // Configure and manage the WebView state
+//                                        DisposableEffect(Unit) {
+//                                            this@MainActivity.webView = webView
+//
+//                                            webView.layoutParams = ViewGroup.LayoutParams(
+//                                                ViewGroup.LayoutParams.MATCH_PARENT,
+//                                                ViewGroup.LayoutParams.MATCH_PARENT
+//                                            )
+//
+//                                            webView.settings.apply {
+//                                                javaScriptEnabled = true
+//                                                allowFileAccess = true
+//                                                allowContentAccess = true
+//                                                domStorageEnabled = true
+//                                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+//
+//                                                loadWithOverviewMode = true
+//                                                useWideViewPort = true
+//                                                builtInZoomControls = true
+//                                                displayZoomControls = false
+//
+//                                                javaScriptEnabled = true
+//                                                domStorageEnabled = true
+//                                                javaScriptCanOpenWindowsAutomatically = true
+////                                                setSupportMultipleWindows(false)
+//
+//                                                pluginState = WebSettings.PluginState.ON
+//                                                cacheMode = WebSettings.LOAD_DEFAULT
+//
+//                                                javaScriptEnabled = true
+//                                                domStorageEnabled = true
+//                                                databaseEnabled = true
+//                                                javaScriptCanOpenWindowsAutomatically = true
+//                                                setSupportMultipleWindows(false)
+////                                                setAppCacheEnabled(true)
+//                                                allowFileAccess = true
+//                                                allowContentAccess = true
+//                                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+//                                                loadWithOverviewMode = true
+//                                                useWideViewPort = true
+//                                            }
+//
+//                                            // enable debugging
+//                                            WebView.setWebContentsDebuggingEnabled(true)
+//
+//                                            // enable cookies
+//                                            CookieManager.getInstance().setAcceptCookie(true)
+//                                            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+//
+//                                            // Define a JavaScript interface
+//                                            class WebAppInterface(private val context: Context) {
+//                                            }
+//
+//                                            // Add the JavaScript interface to your WebView
+//                                            webView.addJavascriptInterface(WebAppInterface(context), "Android")
+//
+//                                            val assetLoader = WebViewAssetLoader.Builder()
+//                                                .addPathHandler(
+//                                                    "/assets/",
+//                                                    WebViewAssetLoader.AssetsPathHandler(context)
+//                                                )
+//                                                .build()
+//
+//                                            class CustomWebChromeClient : WebChromeClient() {
+////                                                override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
+////                                                    val newWebView = WebView(view?.context ?: return false).apply {
+////                                                        settings.javaScriptEnabled = true
+////                                                    }
+////                                                    val dialog = Dialog(view.context).apply {
+////                                                        setContentView(newWebView)
+////                                                        show()
+////                                                    }
+////                                                    newWebView.webViewClient = WebViewClient()
+////                                                    resultMsg?.sendToTarget()
+////                                                    return true
+////                                                }
+//                                            }
+//
+//                                            webView.webChromeClient = CustomWebChromeClient()
+//                                            webView.getSettings().userAgentString = "Android WebView"
+//
+//
+//                                            webView.webViewClient = object : WebViewClient() {
+//                                                override fun onPageFinished(view: WebView?, url: String?) {
+//                                                    loaded = true
+//                                                    super.onPageFinished(view, url)
+//                                                }
+//
+//                                                override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+//                                                    backEnabled = view.canGoBack()
+//                                                }
+//
+//                                                @SuppressLint("WebViewClientOnReceivedSslError")
+//                                                override fun onReceivedSslError(
+//                                                    view: WebView,
+//                                                    handler: SslErrorHandler,
+//                                                    error: SslError
+//                                                ) {
+//                                                    handler.proceed() // Only for debugging; do not use in production
+//                                                }
+//
+////                                                @Deprecated("Deprecated in Java")
+////                                                override fun shouldOverrideUrlLoading(view: WebView, url: String?): Boolean {
+////                                                    return false  // Let WebView handle all redirects
+////                                                }
+//
+//                                                @Deprecated("Deprecated in Java")
+//                                                override fun shouldOverrideUrlLoading(
+//                                                    view: WebView,
+//                                                    url: String?
+//                                                ): Boolean {
+//                                                    Timber.i("webview url to load: $url")
+//
+////                                                    if (url == "https://app.foxglove.dev/signin?returnTo=%2F200") {
+////                                                        view.loadUrl(webViewUrl)
+////                                                    } else {
+//                                                        view.loadUrl(url!!)
+////                                                    }
+//
+//                                                    return true
+//                                                }
+////
+////                                                override fun shouldOverrideUrlLoading(
+////                                                    view: WebView,
+////                                                    request: WebResourceRequest
+////                                                ): Boolean {
+////                                                    view.loadUrl(request.url.toString())
+////                                                    Timber.i("loading: build.VERSION_CODES.N")
+////                                                    return true
+////                                                    //return super.shouldOverrideUrlLoading(view, request);
+////                                                }
+//
+//                                                @Deprecated(
+//                                                    "Deprecated in Java", ReplaceWith(
+//                                                        "assetLoader.shouldInterceptRequest(Uri.parse(url))!!",
+//                                                        "android.net.Uri"
+//                                                    )
+//                                                )
+//                                                override fun shouldInterceptRequest(
+//                                                    view: WebView?,
+//                                                    url: String?
+//                                                ): WebResourceResponse {
+//                                                    return assetLoader.shouldInterceptRequest(Uri.parse(url))!!
+//                                                }
+//
+//                                                override fun shouldInterceptRequest(
+//                                                    view: WebView?,
+//                                                    request: WebResourceRequest?
+//                                                ): WebResourceResponse? {
+//                                                    return assetLoader.shouldInterceptRequest(request!!.url)
+//                                                }
+//                                            }
+//
+//                                            // Restore state or load URL
+//                                            if (savedInstanceState != null) {
+//                                                webView.restoreState(savedInstanceState)
+//                                            } else {
+//                                                Timber.i("loading url start: $webViewUrl")
+//                                                webView.loadUrl(webViewUrl)
+//                                            }
+//
+//                                            onDispose { }
+//                                        }
+//
+//                                        AndroidView(
+//                                            modifier = Modifier
+//                                                .aspectRatio(1f)
+////                                                .width(320.dp)
+////                                                .height(540.dp)
+//                                                .padding(16.dp),
+//                                            factory = { webView },
+////                                            update = {
+////                                                it.loadUrl(webViewUrl)
+////                                            }
+//                                        )
+//                                    }
+//                                }
+//                            }
+                        }
                     }
                 }
             }
@@ -185,8 +459,48 @@ class MainActivity : ComponentActivity() {
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION // will make sound bar show for phone instead of media, but will activate echo cancellation
         audioManager.isSpeakerphoneOn = true // Switch audio output device from earphone to speaker, for louder volume.
 
+        lifecycleScope.launch(Dispatchers.IO) {
+            while(true) {
+                val base64Data = audioInput.read()
+                if (base64Data != null) {
+                    if (/*state.value.avatarSessionState == SessionState.CONNECTED &&*/ state.value.openaiSessionState == OpenAIState.CONNECTED) {
+                        openai.sendInputAudioToWebsocket(base64Data)
+                    }
+                }
+            }
+        }
 
-        val openai = OpenAI()
+        if (!loaded) {
+            loaded = true
+            openWebsite()
+        }
+    }
+
+    private fun openWebsite() {
+        // open https://app.foxglove.dev/ in chrome
+        // launch in adjacent mode: https://developer.android.com/develop/ui/views/layout/support-multi-window-mode#launch_adjacent
+        val intent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse(webViewUrl)
+        )
+        intent.setFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        webView?.saveState(outState) // Save WebView state
+    }
+
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        super.onRestoreInstanceState(savedInstanceState)
+        webView?.restoreState(savedInstanceState) // Restore WebView state
+    }
+
+    // region OpenAI
+    fun startOpenAI() {
+        audioInput.startRecording()
+
         lifecycleScope.launch(Dispatchers.IO) {
             openai.startWebsocket(
                 onSessionState = { newState ->
@@ -195,6 +509,11 @@ class MainActivity : ComponentActivity() {
                 onUserTalking = {
                     // stop talking
                     onStopSpeakingButtonClicked()
+
+                    state.value = state.value.copy(aiResponseText = "")
+                },
+                onBotDeltaResponse = { response ->
+                    state.value = state.value.copy(aiResponseText = state.value.aiResponseText + response)
                 },
                 onBotResponse = { response ->
                     // start talking
@@ -202,19 +521,13 @@ class MainActivity : ComponentActivity() {
                 }
             )
         }
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            while(true) {
-                val base64Data = audioInput.read()
-                if (base64Data != null) {
-                    if (state.value.avatarSessionState == SessionState.CONNECTED && state.value.openaiSessionState == OpenAIState.CONNECTED) {
-//                        Timber.i("Sending audio data to OpenAI: ${base64Data}")
-                        openai.sendInputAudioToWebsocket(base64Data)
-                    }
-                }
-            }
-        }
     }
+
+    fun stopOpenAI() {
+        audioInput.close()
+        openai.stopWebsocket()
+    }
+    // endregion
 
     override fun onDestroy() {
         super.onDestroy()
@@ -236,20 +549,25 @@ class MainActivity : ComponentActivity() {
 
     @Throws(URISyntaxException::class)
     fun onStartSessionButtonClicked() {
-        state.value = state.value.copy(avatarSessionState = SessionState.CONNECTING)
+        if (state.value.enableAzure) {
+            state.value = state.value.copy(avatarSessionState = SessionState.CONNECTING)
 
-        if (synthesizer != null) {
-            speechConfig!!.close()
-            synthesizer!!.close()
-            connection!!.close()
+            if (synthesizer != null) {
+                speechConfig!!.close()
+                synthesizer!!.close()
+                connection!!.close()
+            }
+
+            if (peerConnection != null) {
+                peerConnection!!.close()
+            }
+
+            videoRenderer!!.addFrameListener(frameListener, 1.0f)
+
+            fetchIceToken()
         }
 
-        if (peerConnection != null) {
-            peerConnection!!.close()
-        }
-
-        videoRenderer!!.addFrameListener(frameListener, 1.0f)
-        fetchIceToken()
+        startOpenAI()
     }
 
     @Throws(ExecutionException::class, InterruptedException::class)
@@ -277,10 +595,11 @@ class MainActivity : ComponentActivity() {
     fun onStopSessionButtonClicked() {
         if (synthesizer == null) {
             updateOutputMessage("Please start the avatar session first", true, true)
-            return
+        } else {
+            synthesizer!!.close()
         }
 
-        synthesizer!!.close()
+        stopOpenAI()
     }
 
     private fun initializePeerConnectionFactory() {
@@ -353,13 +672,13 @@ class MainActivity : ComponentActivity() {
                 updateOutputMessage("Fetching ICE token ...", false, true)
                 try {
                     val endpoint =
-                        "https://" + serviceRegion + ".tts.speech.microsoft.com"
+                        "https://" + speechServiceRegion + ".tts.speech.microsoft.com"
                     val url = URL("$endpoint/cognitiveservices/avatar/relay/token/v1")
                     val urlConnection = url.openConnection() as HttpURLConnection
                     urlConnection.requestMethod = "GET"
                     urlConnection.setRequestProperty(
                         "Ocp-Apim-Subscription-Key",
-                        speechSubscriptionKey
+                        speechServiceKey
                     )
                     urlConnection.connect()
                     val responseStream = urlConnection.inputStream
@@ -532,9 +851,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun connectAvatar(localSDP: String) {
-        val endpoint = "wss://" + serviceRegion + ".tts.speech.microsoft.com"
+        val endpoint = "wss://" + speechServiceRegion + ".tts.speech.microsoft.com"
         val uri = URI.create("$endpoint/cognitiveservices/websocket/v1?enableTalkingAvatar=true")
-        speechConfig = SpeechConfig.fromEndpoint(uri, speechSubscriptionKey)
+        speechConfig = SpeechConfig.fromEndpoint(uri, speechServiceKey)
         speechConfig!!.setSpeechSynthesisVoiceName(ttsVoice)
         if (ttsEndpointID.isNotEmpty()) {
             speechConfig!!.setEndpointId(ttsEndpointID)
@@ -739,52 +1058,92 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun Content(
+fun AIBotContent(
     state: MainActivity.MainActivityState,
+    onAzureEnabledToggle: (Boolean) -> Unit,
     onVideoRendererCreated: (SurfaceViewRenderer) -> Unit,
     onStartSessionButtonClicked: () -> Unit,
     onStopSessionButtonClicked: () -> Unit
 ) {
     val context = LocalContext.current
 
-    Column {
+    Column(
+        modifier = Modifier
+            .widthIn(max = 500.dp)
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
         Button(
+            modifier = Modifier.padding(top = 16.dp),
             onClick = {
-                when (state.avatarSessionState) {
-                    SessionState.DISCONNECTED -> onStartSessionButtonClicked()
-                    SessionState.CONNECTING -> onStopSessionButtonClicked()
-                    SessionState.CONNECTED -> onStopSessionButtonClicked()
+                if ((!state.enableAzure || state.avatarSessionState == SessionState.DISCONNECTED) && state.openaiSessionState == OpenAIState.DISCONNECTED) {
+                    onStartSessionButtonClicked()
+                } else {
+                    onStopSessionButtonClicked()
                 }
             }
         ) {
-            Text(text = when (state.avatarSessionState) {
-                SessionState.DISCONNECTED -> "Start Session"
-                SessionState.CONNECTING -> "Connecting..."
-                SessionState.CONNECTED -> "Stop Session"
-            })
+            Text(
+                text = if ((!state.enableAzure || state.avatarSessionState == SessionState.DISCONNECTED) && state.openaiSessionState == OpenAIState.DISCONNECTED) {
+                    "Start Session"
+                } else {
+                    "Stop Session"
+                }
+            )
         }
 
-        Text("AI: ${state.openaiSessionState}")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Enable Azure",
+            )
+            Switch(
+                checked = state.enableAzure,
+                onCheckedChange = onAzureEnabledToggle
+            )
+        }
 
-        AndroidView(
-            modifier = Modifier
-                .width(320.dp)
-                .height(540.dp),
-            factory = {
-                SurfaceViewRenderer(context).apply {
-                    onVideoRendererCreated(this)
+        Text("Azure: ${state.avatarSessionState}")
+        Text("OpenAI: ${state.openaiSessionState}")
+
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // Aspect ratio (e.g., 320:540)
+            val aspectRatio = 320f / 540f
+
+            // Calculate width, constrained to a maximum of 200.dp
+            val maxWidthDp = 200.dp
+            val width = if (constraints.maxWidth.dp > maxWidthDp) maxWidthDp else constraints.maxWidth.dp
+            val height = width / aspectRatio
+
+            AndroidView(
+                modifier = Modifier
+                    .width(width)
+                    .height(height),
+                factory = {
+                    SurfaceViewRenderer(context).apply {
+                        onVideoRendererCreated(this)
+                    }
                 }
-            }
-        )
+            )
+        }
+
+        Text("Response:\n${state.aiResponseText}")
     }
 }
 
 @Preview(showBackground = true, widthDp = 1000, heightDp = 700)
 @Composable
-fun ContentPreview() {
+fun AIBotContentPreview() {
     AIAppTheme {
-        Content(
+        AIBotContent(
             state = MainActivity.MainActivityState(),
+            onAzureEnabledToggle = {},
             onVideoRendererCreated = {},
             onStartSessionButtonClicked = {},
             onStopSessionButtonClicked = {}

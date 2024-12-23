@@ -66,4 +66,6 @@ dependencies {
     implementation(libs.ktor.client.websockets)
     // Kotlinx serialization
     implementation(libs.kotlinx.serialization.json)
+    // webkit
+    implementation(libs.androidx.webkit)
 }
