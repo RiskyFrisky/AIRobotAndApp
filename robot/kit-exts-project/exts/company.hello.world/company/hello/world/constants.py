@@ -1,0 +1,1 @@
+server_ip = "<your_isaac_sim_server_ip>"
