@@ -3,7 +3,7 @@
 - [What is it](#what-is-it)
 - [How it works](#how-it-works)
 - [Running the application](#running-the-application)
-		- [Testing environment](#testing-environment)
+	- [Testing environment](#testing-environment)
 	- [Robot](#robot)
 	- [Android](#android)
 	- [Troubleshooting](#troubleshooting)
@@ -29,7 +29,7 @@ A robot pick and place simulation built in Isaac Sim. Use an Android app to inte
 	- Keeps track of items that have fallen into North & West bins by subscribing to a message bus. This information can be queried.
 	- Can tell Isaac Sim to spawn a new cube, stop the robot, start the robot.
 - Android app
-	- Runs an Android app that connects to OpenAI realtime API and Azure avatar for natural language interaction. When a command is received by the user, it'll send the request to the Flask API server.
+	- Runs an Android app that connects to OpenAI realtime API and Azure avatar for natural language interaction. When a command is received by the user, it'll send the request to the Flask API server. The Azure avatar is used to act as an AI assistant. When talking to the Android app, the generated response text is forwarded to the Azure avatar to generate speech and human-like gestures in body, head, and lip sync.
 	- Opens the Foxglove client in a web browser in split view for viewing live simulation data.
 # Running the application
 ### Testing environment
@@ -70,7 +70,7 @@ if prim_type != "invalid":
 	except Exception as e:
 		print(f"An unexpected error occurred: {e}")
 ```
-1. NOTE: The app should already be running, but each time you start the application you'll always need to restart it in order for the connection Foxglove to work.
+7. NOTE: The app should already be running, but each time you start the application you'll always need to restart it in order for the connection Foxglove to work.
 ## Android
 1. Open the `android` project in Android Studio.
 2. Open `Constants.kt` and replace the values.
