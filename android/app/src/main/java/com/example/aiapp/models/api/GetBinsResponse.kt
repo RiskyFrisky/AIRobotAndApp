@@ -1,4 +1,4 @@
-package com.example.aiapp.models
+package com.example.aiapp.models.api
 
 import kotlinx.serialization.Serializable
 

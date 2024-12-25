@@ -8,6 +8,9 @@ import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import java.util.Base64
 
+/**
+ * Class for handling audio input with echo cancellation and noise suppression.
+ */
 @SuppressLint("MissingPermission")
 class AudioInput() {
     private val sampleRate = 24000
@@ -20,6 +23,9 @@ class AudioInput() {
     private var audioRecord: AudioRecord? = null
     private val audioLock = Any() // Lock object for thread-safety
 
+    /**
+     * Starts recording audio with echo cancellation and noise suppression.
+     */
     fun startRecording() {
         synchronized(audioLock) {
             // check if audioRecord is already recording
@@ -51,6 +57,10 @@ class AudioInput() {
         }
     }
 
+    /**
+     * Reads audio data from the microphone and returns it as a Base64 encoded string.
+     * @return Base64 encoded audio data, or null if not recording.
+     */
     fun read(): String? {
         synchronized(audioLock) {
             val currentAudioRecord = audioRecord ?: return null
@@ -70,6 +80,9 @@ class AudioInput() {
         }
     }
 
+    /**
+     * Stops recording and releases the audio resources.
+     */
     fun close() {
         synchronized(audioLock) {
             audioRecord?.let {

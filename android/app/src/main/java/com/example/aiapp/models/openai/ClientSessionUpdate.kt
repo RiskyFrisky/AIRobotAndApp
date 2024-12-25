@@ -1,4 +1,4 @@
-package com.example.aiapp.models
+package com.example.aiapp.models.openai
 
 import com.example.aiapp.openaiTools.GetBins
 import com.example.aiapp.openaiTools.SimCommand
