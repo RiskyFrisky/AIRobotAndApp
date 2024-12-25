@@ -32,7 +32,7 @@ A robot pick and place simulation built in Isaac Sim. Use an Android app to inte
 	- Runs an Android app that connects to OpenAI realtime API and Azure avatar for natural language interaction. When a command is received by the user, it'll send the request to the Flask API server. The Azure avatar is used to act as an AI assistant. When talking to the Android app, the generated response text is forwarded to the Azure avatar to generate speech and human-like gestures in body, head, and lip sync.
 	- Opens the Foxglove client in a web browser in split view for viewing live simulation data.
 # Running the application
-### Testing environment
+## Testing environment
 - Windows 11 with RTX 3060Ti
 - Isaac Sim v4.2.0
 - Android Studio Ladybug
@@ -49,7 +49,7 @@ A robot pick and place simulation built in Isaac Sim. Use an Android app to inte
 5. Run the app from within the `robot/app` directory in Powershell.
 ```bash
 Set-Alias -Name isaac_python -Value "C:\users\yourname\appdata\local\ov\pkg\isaac-sim-4.2.0\python.bat"
-
+isaac_python -m pip install flask
 isaac_python main.py
 ```
 6. The first time you run the app, you'll need to install the Foxglove extension manually b/c it is an untrusted extension + you'll need to fix a bug
