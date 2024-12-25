@@ -1,5 +1,6 @@
 from isaacsim import SimulationApp
 
+# Initialize the simulation app with specified settings
 simulation_app = SimulationApp({
     "width": "1280",
     "height": "720",
@@ -7,9 +8,6 @@ simulation_app = SimulationApp({
 })
 
 from omni.isaac.core.utils.extensions import enable_extension
-
-# webrtc client extension has to be loaded before any other omni.isaac packages
-# enable_extension("omni.services.streamclient.webrtc")
 
 import numpy as np
 from omni.isaac.core.objects import DynamicCuboid, VisualCuboid
@@ -21,9 +19,6 @@ from omni.isaac.cortex.dfb import DfDiagnosticsMonitor
 from omni.isaac.cortex.cortex_utils import get_assets_root_path
 from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.isaac.core.world import World
-# from simple_decider_network import make_decider_network
-# from block_stacking_behavior import make_decider_network
-# from bin_stacking_behavior import make_decider_network
 from decider_network import make_decider_network
 import decider_network as decider_network
 import omni
@@ -60,70 +55,49 @@ from pxr import Gf, UsdGeom
 import carb.events
 import omni.kit.app
 
-
 from omni.isaac.core.scenes.scene import Scene
 
+# Define a custom gripper class for the robot
 class MyGripper(CortexGripper):
-    """Franka specific parallel gripper.
-
-    Specifies the gripper joints, provides mappings from width to joints, and defines the franka
-    opened and closed widths.
-
-    Args:
-        articulation: The Articulation object containing the finger joints that will be controlled
-            by this parallel graipper.
-    """
-
     def __init__(self, articulation: Articulation):
-        # gripper_articulation = Articulation("/World/Robot/Robotiq_2F_140")
-        # gripper_articulation.initialize()
+        """
+        Initialize the custom gripper.
+
+        Args:
+            articulation (Articulation): The Articulation object containing the finger joints that will be controlled by this gripper.
+        """
         super().__init__(
             articulation_subset=ArticulationSubset(articulation, ["finger_joint"]),
             opened_width=0,
-            closed_width=0.79,
+            closed_width=0.79,  # found from testing in Isaac robot assembler tool
         )
 
     def joints_to_width(self, joint_positions: Sequence[float]) -> float:
-        """The width is simply the sum of the two prismatic joints.
+        """
+        Convert joint positions to gripper width.
 
         Args:
-            joint_positions: The values for joints ["panda_finger_joint1", "panda_finger_joint2"].
+            joint_positions (Sequence[float]): The values for joints ["finger_joint"].
 
         Returns:
-            The width of the gripper corresponding to those joint positions.
+            float: The width of the gripper corresponding to those joint positions.
         """
         return joint_positions[0]
 
     def width_to_joints(self, width: float) -> np.ndarray:
-        """Each joint is half of the width since the width is their sum.
+        """
+        Convert gripper width to joint positions.
 
         Args:
-            width: The width of the gripper
+            width (float): The width of the gripper.
 
         Returns:
-            The values for joints ["panda_finger_joint1", "panda_finger_joint2"] giving the
-            requested gripper width.
+            np.ndarray: The values for joints ["finger_joint"] giving the requested gripper width.
         """
         return np.array([width])
 
+# Define a custom UR10 robot class
 class MyCortexUr10(MotionCommandedRobot):
-    """The Cortex Franka contains commanders for commanding the end-effector (a MotionCommander
-    governing the full arm) and the gripper (a FrankaGripper governing the fingers).
-
-    Each of these commanders are accessible via members commander and gripper.
-
-    This object only wraps an existing USD UR10 on the stage at the specified prim_path. To
-    add it to the stage first then wrap it, use the add_ur10_to_stage() method.
-
-    Note that position and orientation are both relative to the prim the UR10 sits on.
-
-    Args:
-        name: A name for the UR10 robot. Robots added to the CortexWorld should all have unique names.
-        prim_path: The path to the Franka prim in the USD stage.
-        position: The position of the robot. See CortexRobot's position parameter for details.
-        orientation: The orientation of the robot. See CortexRobot's orientation parameter for details.
-    """
-
     def __init__(
         self,
         name: str,
@@ -131,6 +105,15 @@ class MyCortexUr10(MotionCommandedRobot):
         position: Optional[Sequence[float]] = None,
         orientation: Optional[Sequence[float]] = None,
     ):
+        """
+        Initialize the custom UR10 robot.
+
+        Args:
+            name (str): A name for the UR10 robot.
+            prim_path (str): The path to the UR10 prim in the USD stage.
+            position (Optional[Sequence[float]]): The position of the robot.
+            orientation (Optional[Sequence[float]]): The orientation of the robot.
+        """
         motion_policy_config = icl.load_supported_motion_policy_config("UR10", "RMPflowCortex")
         super().__init__(
             name=name,
@@ -140,26 +123,48 @@ class MyCortexUr10(MotionCommandedRobot):
             orientation=orientation,
             settings=MotionCommandedRobot.Settings(smoothed_rmpflow=False, smoothed_commands=False),
         )
-
-        # self.gripper_articulation = Articulation("/World/Robot/Robotiq_2F_140")
-        # self.gripper_commander = MyGripper(self.gripper_articulation)
+        # add a gripper commander to the robot
         self.gripper_commander = MyGripper(self)
         self.add_commander("gripper", self.gripper_commander)
 
     def initialize(self, physics_sim_view: omni.physics.tensors.SimulationView = None) -> None:
-        super().initialize(
-            physics_sim_view=physics_sim_view
-        )
-        # self.grippe/r_articulation.initialize(physics_sim_view=physics_sim_view)
+        """
+        Initialize the robot with the physics simulation view.
 
+        Args:
+            physics_sim_view (omni.physics.tensors.SimulationView, optional): The physics simulation view.
+        """
+        super().initialize(physics_sim_view=physics_sim_view)
 
+# Utility functions to get transformations and positions of prims
 def get_prim_transform(prim):
-        gf_transform = UsdGeom.XformCache().GetLocalToWorldTransform(prim)
-        gf_transform.Orthonormalize()
-        gf_translation = gf_transform.ExtractTranslation()
-        gf_rot = gf_transform.ExtractRotation()
-        return gf_translation, gf_rot
+    """
+    Get the transformation of a prim.
+
+    Args:
+        prim (Usd.Prim): The prim to get the transformation for.
+
+    Returns:
+        tuple: The translation and rotation of the prim.
+    """
+    gf_transform = UsdGeom.XformCache().GetLocalToWorldTransform(prim)
+    gf_transform.Orthonormalize()
+    gf_translation = gf_transform.ExtractTranslation()
+    gf_rot = gf_transform.ExtractRotation()
+    return gf_translation, gf_rot
+
 def get_prim_pos(stage, prim_path, prim=None):
+    """
+    Get the position of a prim.
+
+    Args:
+        stage (Usd.Stage): The USD stage.
+        prim_path (str): The path to the prim.
+        prim (Usd.Prim, optional): The prim object.
+
+    Returns:
+        carb.Float3: The position of the prim.
+    """
     if prim is None:
         prim = stage.GetPrimAtPath(prim_path)
     if prim:
@@ -167,7 +172,19 @@ def get_prim_pos(stage, prim_path, prim=None):
         return carb.Float3(gf_translation[0], gf_translation[1], gf_translation[2])
     else:
         return None
+
 def get_prim_rot_quat(stage, prim_path, prim=None):
+    """
+    Get the rotation quaternion of a prim.
+
+    Args:
+        stage (Usd.Stage): The USD stage.
+        prim_path (str): The path to the prim.
+        prim (Usd.Prim, optional): The prim object.
+
+    Returns:
+        Gf.Quatf: The rotation quaternion of the prim.
+    """
     if prim is None:
         prim = stage.GetPrimAtPath(prim_path)
     if prim:
@@ -176,35 +193,56 @@ def get_prim_rot_quat(stage, prim_path, prim=None):
     else:
         return None
 
+def prims_by_parent_path(parent_prim_path: str) -> list[Usd.Prim]:
+    """
+    Get prims by parent path.
+
+    Args:
+        parent_prim_path (str): The path to the parent prim.
+
+    Returns:
+        list[Usd.Prim]: The list of child prims.
+    """
+    stage: Usd.Stage = omni.usd.get_context().get_stage()
+    parent_prim = stage.GetPrimAtPath(parent_prim_path)
+    if not parent_prim.IsValid():
+        return []
+    return parent_prim.GetChildren()
+
+# Function to generate a random spawn transform for bins
 def random_bin_spawn_transform():
+    """
+    Generate a random spawn transform for bins.
+
+    Returns:
+        tuple: The position and quaternion of the spawn transform.
+    """
     stage = omni.usd.get_context().get_stage()
     prim = stage.GetPrimAtPath("/World/Points/SpawnPoint")
     pos = get_prim_pos(stage, "/World/Points/SpawnPoint", prim)
     position = np.array([pos[0], pos[1], pos[2]])
-
-    # randomize x a bit +- 0.1
     position[0] += random.random() * 0.2 - 0.1
-
     z = random.random() * 0.02 - 0.01
     w = random.random() * 0.02 - 0.01
     norm = np.sqrt(z**2 + w**2)
     quat = math_util.Quaternion([w / norm, 0, 0, z / norm])
-
     return position, quat.vals
 
+# Global variables for scene and cubes
 scene: Scene = None
 cubes = []
 last_spawned_cube = None
 
+# Function to spawn a new cube
 def spawn_cube():
+    """
+    Spawn a new cube in the scene.
+    """
     global scene, cubes, last_spawned_cube
-
     if scene is None:
         return
-
     name = "bin_{}".format(len(cubes))
     prim_path = "/World/bins/{}".format(name)
-
     width = 0.09
     DynamicCuboid(
         prim_path=prim_path,
@@ -212,20 +250,24 @@ def spawn_cube():
         size=width,
         color=np.array([0.7, 0.0, 0.0])
     )
-
     last_spawned_cube = scene.add(CortexRigidPrim(name=name, prim_path=prim_path))
     cubes.append(last_spawned_cube)
-
     x, q = random_bin_spawn_transform()
     last_spawned_cube.set_world_pose(position=x, orientation=q)
-    # rigid_cube.set_linear_velocity(np.array([0, -0.30, 0]))
     last_spawned_cube.set_visibility(True)
 
-class BinStackingTask(BaseTask):
+# Define a task for bin stacking
+class SpawnCubeTask(BaseTask):
     def __init__(self):
+        """
+        Initialize the bin stacking task.
+        """
         super().__init__("bin_stacking")
 
     def post_reset(self) -> None:
+        """
+        Reset the task by clearing all spawned cubes.
+        """
         global cubes, last_spawned_cube
         if len(cubes) > 0:
             for rigid_bin in cubes:
@@ -234,25 +276,38 @@ class BinStackingTask(BaseTask):
         last_spawned_cube = None
 
     def pre_step(self, time_step_index, simulation_time) -> None:
-        """Spawn a new randomly oriented bin if the previous bin has been placed."""
-        global last_spawned_cube
+        """
+        Spawn a new randomly oriented bin if the previous bin has been placed.
 
+        Args:
+            time_step_index (int): The current time step index.
+            simulation_time (float): The current simulation time.
+        """
+        global last_spawned_cube
         spawn_new = False
         if last_spawned_cube is None:
             spawn_new = True
         else:
             (x, y, z), _ = last_spawned_cube.get_world_pose()
-            is_on_conveyor = 0.3 < y and y < 4.5 and 0.2 < x and x < 0.7
+            is_on_conveyor = 0.3 < y < 4.5 and 0.2 < x < 0.7
             if not is_on_conveyor:
                 spawn_new = True
-
         if spawn_new:
             spawn_cube()
 
+# Event handler for simulation commands
 def on_sim_command(event: carb.events.IEvent):
+    """
+    Handle simulation commands.
+    1. Spawn a new cube.
+    2. Stop the robot.
+    3. Start the robot.
+
+    Args:
+        event (carb.events.IEvent): The event containing the simulation command.
+    """
     data = event.payload["command"]
     print(f"on_sim_command = {data}")
-
     if data == 1:
         spawn_cube()
         print("spawned cube")
@@ -263,18 +318,16 @@ def on_sim_command(event: carb.events.IEvent):
         decider_network.can_run_robot = True
         print(f"can_run_robot = {decider_network.can_run_robot}")
 
-def prims_by_parent_path(parent_prim_path: str) -> list[Usd.Prim]:
-    stage: Usd.Stage = omni.usd.get_context().get_stage()
-    parent_prim = stage.GetPrimAtPath(parent_prim_path)
-    if not parent_prim.IsValid():
-        return []
-    return parent_prim.GetChildren()
-
+# Main function to run the simulation
 def main():
+    """
+    Main function to run the simulation.
+    """
+    # enable custom extension to start Flask server
     enable_extension("company.hello.world")
+    # enable Foxglove extension
     enable_extension("foxglove.tools.ws_bridge")
     simulation_app.update()
-
     # open stage
     omni.usd.get_context().open_stage("Scene.usd")
     # wait two frames so that stage starts loading
@@ -286,30 +339,23 @@ def main():
     print("Loading Complete")
 
     world: CortexWorld = CortexWorld()
-
     global scene
     scene = world.scene
 
     robot_position_path = "/World/Robot"
     robot_articulation_path = "/World/Robot/Robotiq_2F_140"
-
     stage_obj: Usd.Stage = omni.usd.get_context().get_stage()
+
+    # print some information about the robot
     robot_prim = stage_obj.GetPrimAtPath(robot_position_path)
     position = get_prim_pos(stage_obj, robot_position_path, robot_prim)
     position = np.array([position[0], position[1], position[2]])
     print("position:", position)
-
-    # nparray position
     orientation = get_prim_rot_quat(stage_obj, robot_position_path, robot_prim)
-    print("orientation 1:", orientation)
-
-    # orientation = np.array([orientation.GetReal(), orientation.GetImaginary()[0], orientation.GetImaginary()[1], orientation.GetImaginary()[2]])
-    print("orientation 2:", orientation)
-
+    print("orientation:", orientation)
     pos, rot = get_prim_transform(robot_prim)
     print("pos:", pos)
     print("rot:", rot)
-
     rotation = Rotation.from_quat([orientation.GetReal(), orientation.GetImaginary()[0], orientation.GetImaginary()[1], orientation.GetImaginary()[2]])
     rotation_matrix = rotation.as_matrix()
     print("rotation_matrix:", rotation_matrix)
@@ -319,7 +365,7 @@ def main():
         prim_path=robot_articulation_path
     ))
 
-    # create VisualCuboid that represents the stand's dimensions
+    # register all virtual obstacles under /World/Obstacles
     obstacles: list[Usd.Prim] = prims_by_parent_path("/World/Obstacles")
     for obstacle in obstacles:
         print(f"path: {obstacle.GetPath()}")
@@ -329,25 +375,26 @@ def main():
         )
         robot.register_obstacle(stand)
 
-    world.add_task(BinStackingTask())
+    world.add_task(SpawnCubeTask())
 
+    # get positions of drop points
     dropPointA = stage_obj.GetPrimAtPath("/World/Points/DropPointA")
     dropPointB = stage_obj.GetPrimAtPath("/World/Points/DropPointB")
-
     dropPointAPos = get_prim_pos(stage_obj, "/World/Points/DropPointA", dropPointA)
     dropPointAPos = np.array([dropPointAPos[0], dropPointAPos[1], dropPointAPos[2]])
     dropPointBPos = get_prim_pos(stage_obj, "/World/Points/DropPointB", dropPointB)
     dropPointBPos = np.array([dropPointBPos[0], dropPointBPos[1], dropPointBPos[2]])
 
+    # add Cortex decider network
     world.add_decider_network(make_decider_network(robot, dropPointAPos, dropPointBPos))
-
     world.reset()
 
-
+    # subscribe to message bus to listen for sim commands
     message_bus = omni.kit.app.get_app().get_message_bus_event_stream()
     sim_command_msg = carb.events.type_from_string("simCommand")
     sim_command_sub = message_bus.create_subscription_to_pop_by_type(sim_command_msg, on_sim_command)
 
+    # run the simulation
     world.run(simulation_app)
     simulation_app.close()
 
