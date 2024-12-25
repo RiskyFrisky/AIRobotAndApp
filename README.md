@@ -70,7 +70,7 @@ if prim_type != "invalid":
 	except Exception as e:
 		print(f"An unexpected error occurred: {e}")
 ```
-7. NOTE: The app should already be running, but each time you start the application you'll always need to restart it in order for the connection Foxglove to work.
+7. NOTE: The simulation should already be playing, but each time you start the application you'll always need to rerun it in order for the connection Foxglove to work.
 ## Android
 1. Open the `android` project in Android Studio.
 2. Open `Constants.kt` and replace the values.
