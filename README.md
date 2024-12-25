@@ -1,5 +1,6 @@
 # Table of contents
 - [Table of contents](#table-of-contents)
+- [What is it](#what-is-it)
 - [How it works](#how-it-works)
 - [Running the application](#running-the-application)
     - [Testing environment](#testing-environment)
@@ -11,6 +12,9 @@
   - [Robot](#robot-1)
   - [Android](#android-1)
   - [Most commonly used Copilot features](#most-commonly-used-copilot-features)
+
+# What is it
+A robot pick and place simulation built in Isaac Sim. Use an Android app to interact with the simulation using your natural language.
 
 # How it works
 ![Pasted image 20241223200128.png](docs/images/Pasted%20image%2020241223200128.png)
@@ -42,7 +46,7 @@
 	1. Open `C:\Users\yourname\AppData\Local\ov\pkg\isaac-sim-4.2.0\exts\omni.isaac.kit\omni\isaac\kit\simulation_app.py`
 	2. Add another path to `args` in `def _start_app(self) -> None:`
 		1. Mine was `c:/users/yourname/appdata/local/ov/pkg/isaac-sim-4.2.0/airobotandapp/robot/kit-exts-project/exts`
-5. Run the app from within the `robot/app` directory in Powershell
+5. Run the app from within the `robot/app` directory in Powershell.
 ```bash
 Set-Alias -Name isaac_python -Value "C:\users\yourname\appdata\local\ov\pkg\isaac-sim-4.2.0\python.bat"
 
@@ -69,7 +73,7 @@ if prim_type != "invalid":
 7. NOTE: The app should already be running, but each time you start the application you'll always need to restart it in order for the connection Foxglove to work.
 ## Android
 1. Open the `android` project in Android Studio.
-2. Open Constants.kt and replace the values.
+2. Open `Constants.kt` and replace the values.
 	1. For the Azure speech credentials, you can create a speech resource through the Azure speech portal: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/get-started-speech-to-text?tabs=windows%2Cterminal&pivots=ai-studio.
 		1. NOTE: The Azure avatar only supports the regions listed here: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/text-to-speech-avatar/what-is-text-to-speech-avatar#available-locations
 	2. For the OpenAI key, you can create one by going to https://platform.openai.com/api-keys.
@@ -114,6 +118,7 @@ if prim_type != "invalid":
 - Code generation
 - Code explanation
 - Fixing bugs
+- Code cleanup
 - Documentation
 ## Robot
 - Use copilot to explain & help merge the [Cortex Walkthrough: Franka Block Stacking](https://docs.omniverse.nvidia.com/isaacsim/latest/cortex_tutorials/tutorial_cortex_4_franka_block_stacking.html) and [Cortex Walkthrough: UR10 Bin Stacking](https://docs.omniverse.nvidia.com/isaacsim/latest/cortex_tutorials/tutorial_cortex_5_ur10_bin_stacking.html) examples which is the core of my simulation application. These example source codes can be found in the Isaac Sim installation path.
