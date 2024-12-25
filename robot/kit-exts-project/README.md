@@ -1,5 +1,7 @@
 # Extension Project Template
 
+- NOTE: the main code is located in `exts/company.hello.world`
+
 This project was automatically generated.
 
 - `app` - It is a folder link to the location of your *Omniverse Kit* based app.
