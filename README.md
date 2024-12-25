@@ -89,19 +89,19 @@ if prim_type != "invalid":
 	1. Conveyor speed set by changing velocity variable of conveyor action graph
 	2. ![Pasted image 20241223201427.png](docs/images/Pasted%20image%2020241223201427.png)
 2. UR10 robot arm added like so
-	1. NOTE: must be placed add origin (0, 0, 0)
+	1. NOTE: must be placed at origin (0, 0, 0)
 	2. ![Pasted image 20241223201541.png](docs/images/Pasted%20image%2020241223201541.png)
 3. 2F-140 end effector added like so
 	1. ![Pasted image 20241223201650.png](docs/images/Pasted%20image%2020241223201650.png)
 	2. Add a `TransformOp -> Transform, Orient, Scale` property and set position to match prim path `/World/Robot/UR10/ee_link`
       	1. ![Pasted image 20241223202049.png](docs/images/Pasted%20image%2020241223202049.png)
-	3. Add fixed physics joint by clicking on `/World/Robot/Robotiq_2F_140/robotiq_base_link /World/Robot/UR10/ee_link` and then `/World/Robot/UR10/ee_link` and right clicking to create the fixed physics joint.
-		1. NOTE: the order of prims clicked matters.
+	3. Add fixed physics joint by clicking on `/World/Robot/Robotiq_2F_140/robotiq_base_link` and then `/World/Robot/UR10/ee_link` and right clicking to create the fixed physics joint.
+		1. NOTE: the order in which the prims are clicked matters.
       		1. ![Pasted image 20241223202320.png](docs/images/Pasted%20image%2020241223202320.png)
 		2. Ensure that `Exclude From Articulation` is unchecked
 			1. ![Untitled 1.png](docs/images/Untitled%201.png)
 4. Verify arm articulation is set up correctly
-	1. Open the robot arm assembler
+	1. Open the robot assembler tool
 		1. ![Pasted image 20241223202733.png](docs/images/Pasted%20image%2020241223202733.png)
 	2. Run the sim & adjust the joint positions
 		1. ![Pasted image 20241223202838.png](docs/images/Pasted%20image%2020241223202838.png)
@@ -110,9 +110,9 @@ if prim_type != "invalid":
 		1. ![Pasted image 20241223203117.png](docs/images/Pasted%20image%2020241223203117.png)
 	2. Add cubes as triggers
 		1. ![Pasted image 20241223203344.png](docs/images/Pasted%20image%2020241223203344.png)
-		2. Add physics trigger
+		2. Add the physics trigger
 			1. ![Pasted image 20241223203456.png](docs/images/Pasted%20image%2020241223203456.png)
-		3. Added action graph to publish triggers to message bus
+		3. Add action graph to publish triggers to message bus
 			1. ![Pasted image 20241223203649.png](docs/images/Pasted%20image%2020241223203649.png)
 # Github Copilot usage
 - Code generation
