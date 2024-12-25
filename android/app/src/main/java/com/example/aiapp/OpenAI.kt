@@ -1,16 +1,18 @@
 package com.example.aiapp
 
-import com.example.aiapp.models.ClientConversationItemCreateFunctionOutput
-import com.example.aiapp.models.ClientInputAudioBufferAppend
-import com.example.aiapp.models.ClientResponseCreate
-import com.example.aiapp.models.ClientSessionUpdate
-import com.example.aiapp.models.FunctionCallItem
-import com.example.aiapp.models.ServerResponseFunctionCallArgumentsDone
-import com.example.aiapp.models.ServerResponseTextDelta
-import com.example.aiapp.models.ServerResponseTextDone
+import com.example.aiapp.models.openai.ClientConversationItemCreateFunctionOutput
+import com.example.aiapp.models.openai.ClientInputAudioBufferAppend
+import com.example.aiapp.models.openai.ClientResponseCreate
+import com.example.aiapp.models.openai.ClientSessionUpdate
+import com.example.aiapp.models.openai.FunctionCallItem
+import com.example.aiapp.models.openai.OpenAISessionState
+import com.example.aiapp.models.openai.ServerResponseFunctionCallArgumentsDone
+import com.example.aiapp.models.openai.ServerResponseTextDelta
+import com.example.aiapp.models.openai.ServerResponseTextDone
 import com.example.aiapp.openaiTools.GetBins
 import com.example.aiapp.openaiTools.SimCommand
 import com.example.aiapp.openaiTools.SimCommandRequest
+import com.example.aiapp.utility.Utility
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.defaultRequest
@@ -25,41 +27,43 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import timber.log.Timber
 
-enum class OpenAIState {
-    DISCONNECTED,
-    CONNECTING,
-    CONNECTED
-}
-
+/**
+ * Class responsible for managing the WebSocket connection to the OpenAI API.
+ */
 class OpenAI {
-    private val backgroundCoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val backgroundCoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob() + Utility.coroutineExceptionHandler)
+
     private var client: HttpClient? = null
     private var websocketSession: DefaultClientWebSocketSession? = null
-    private val jsonConfig = Json {
-        encodeDefaults = true
-        ignoreUnknownKeys = true
-        explicitNulls = false
-    }
 
-    private var onSessionState: (OpenAIState) -> Unit = {}
+    private var onSessionState: (OpenAISessionState) -> Unit = {}
 
+    /**
+     * Starts the WebSocket connection to the OpenAI API.
+     *
+     * @param onSessionState Callback to handle changes in the WebSocket session state.
+     * @param onUserTalking Callback to handle when the user starts talking.
+     * @param onBotDeltaResponse Callback to handle partial responses from the bot.
+     * @param onBotResponse Callback to handle complete responses from the bot.
+     */
     suspend fun startWebsocket(
-        onSessionState: (OpenAIState) -> Unit,
+        onSessionState: (OpenAISessionState) -> Unit,
         onUserTalking: () -> Unit,
         onBotDeltaResponse: (String) -> Unit,
         onBotResponse: (String) -> Unit
     ) {
         this.onSessionState = onSessionState
 
+        // Ensure any existing WebSocket connection is stopped
         stopWebsocket()
 
-        onSessionState(OpenAIState.CONNECTING)
+        // Update the session state to CONNECTING
+        onSessionState(OpenAISessionState.CONNECTING)
 
         // Create an HTTP client with WebSocket support
         client = HttpClient(OkHttp) {
@@ -83,15 +87,17 @@ class OpenAI {
             client?.webSocket(url) {
                 websocketSession = this
                 Timber.i("Connected to server.")
-                onSessionState(OpenAIState.CONNECTED)
+                onSessionState(OpenAISessionState.CONNECTED)
 
+                // Send a session update message
                 val sessionUpdate = ClientSessionUpdate()
-                val jsonStringSessionUpdate = jsonConfig.encodeToString(
+                val jsonStringSessionUpdate = Utility.jsonConfig.encodeToString(
                     ClientSessionUpdate.serializer(),
                     sessionUpdate
                 )
                 send(jsonStringSessionUpdate)
 
+                // Listen for incoming messages
                 while (client != null) {
                     when (val message = incoming.receive()) {
                         is Frame.Text -> {
@@ -99,89 +105,98 @@ class OpenAI {
                                 // Read the incoming message as a JSON string
                                 val jsonString = message.readText()
                                 // Parse the JSON string into a JsonElement
-                                val jsonElement: JsonElement = jsonConfig.parseToJsonElement(jsonString)
+                                val jsonElement: JsonElement = Utility.jsonConfig.parseToJsonElement(jsonString)
                                 val type: String = jsonElement.jsonObject["type"]?.jsonPrimitive?.content ?: throw Exception("Missing 'type' field")
-                                // Check if the received message is an error event
-                                if (type == "error") {
-                                    Timber.e("Error: $jsonElement")
-                                } else if (type == "rate_limits.updated") {
-                                    Timber.i("Rate limits updated: $jsonElement")
-                                } else if (type == "input_audio_buffer.speech_started") {
-                                    Timber.i("User started talking.")
-                                    onUserTalking()
-                                } else if (type == "response.text.delta") {
-                                    val event = jsonConfig.decodeFromJsonElement(
-                                        ServerResponseTextDelta.serializer(),
-                                        jsonElement
-                                    )
-//                                    Timber.i("Bot: ${event.delta}")
-                                    onBotDeltaResponse(event.delta)
-                                } else if (type == "response.text.done") {
-                                    val event = jsonConfig.decodeFromJsonElement(
-                                        ServerResponseTextDone.serializer(),
-                                        jsonElement
-                                    )
-                                    Timber.i("Bot: ${event.text}")
-                                    onBotResponse(event.text)
-                                } else if (type == "response.function_call_arguments.done") {
-                                    val event = jsonConfig.decodeFromJsonElement(
-                                        ServerResponseFunctionCallArgumentsDone.serializer(),
-                                        jsonElement
-                                    )
-                                    val functionName = event.name
-                                    val arguments = event.arguments
-                                    val callId = event.call_id
-                                    Timber.i("Function call: $functionName, args: $arguments")
 
-                                    backgroundCoroutineScope.launch {
-                                        suspend fun setFunctionOutput(output: String) {
-                                            val response =
-                                                ClientConversationItemCreateFunctionOutput(
-                                                    item = FunctionCallItem(
-                                                        call_id = callId,
-                                                        output = output
+                                // Handle different types of messages
+                                when (type) {
+                                    "error" -> {
+                                        Timber.e("Error: $jsonElement")
+                                    }
+                                    "rate_limits.updated" -> {
+                                        Timber.i("Rate limits updated: $jsonElement")
+                                    }
+                                    "input_audio_buffer.speech_started" -> {
+                                        Timber.i("User started talking.")
+                                        onUserTalking()
+                                    }
+                                    "response.text.delta" -> {
+                                        val event = Utility.jsonConfig.decodeFromJsonElement(
+                                            ServerResponseTextDelta.serializer(),
+                                            jsonElement
+                                        )
+                                        onBotDeltaResponse(event.delta)
+                                    }
+                                    "response.text.done" -> {
+                                        val event = Utility.jsonConfig.decodeFromJsonElement(
+                                            ServerResponseTextDone.serializer(),
+                                            jsonElement
+                                        )
+                                        Timber.i("Bot: ${event.text}")
+                                        onBotResponse(event.text)
+                                    }
+                                    "response.function_call_arguments.done" -> {
+                                        val event = Utility.jsonConfig.decodeFromJsonElement(
+                                            ServerResponseFunctionCallArgumentsDone.serializer(),
+                                            jsonElement
+                                        )
+                                        val functionName = event.name
+                                        val arguments = event.arguments
+                                        val callId = event.call_id
+                                        Timber.i("Function call: $functionName, args: $arguments")
+
+                                        // Handle function call in a background coroutine
+                                        backgroundCoroutineScope.launch {
+                                            suspend fun setFunctionOutput(output: String) {
+                                                val response =
+                                                    ClientConversationItemCreateFunctionOutput(
+                                                        item = FunctionCallItem(
+                                                            call_id = callId,
+                                                            output = output
+                                                        )
+                                                    )
+                                                send(
+                                                    Utility.jsonConfig.encodeToString(
+                                                        ClientConversationItemCreateFunctionOutput.serializer(),
+                                                        response
                                                     )
                                                 )
-                                            send(
-                                                jsonConfig.encodeToString(
-                                                    ClientConversationItemCreateFunctionOutput.serializer(),
-                                                    response
-                                                )
-                                            )
-                                        }
-
-                                        try {
-                                            when (functionName) {
-                                                SimCommand.tool.name -> {
-                                                    arguments ?: throw Exception("Missing arguments")
-                                                    val request =
-                                                        jsonConfig.decodeFromString(
-                                                            SimCommandRequest.serializer(),
-                                                            arguments
-                                                        )
-                                                    val response = SimCommand.action(request)
-                                                    setFunctionOutput(response.toString())
-                                                    createResponse()
-                                                }
-                                                GetBins.tool.name -> {
-                                                    val response = GetBins.action()
-                                                    setFunctionOutput(response.toString())
-                                                    createResponse()
-                                                }
-                                                else -> throw Exception("Unknown function: $functionName")
                                             }
-                                        } catch (e: Exception) {
-                                            Timber.e(e, "Error for ${event.type}")
+
                                             try {
-                                                setFunctionOutput("Error for function $functionName: ${e.localizedMessage}")
-                                                createResponse()
+                                                when (functionName) {
+                                                    SimCommand.tool.name -> {
+                                                        arguments ?: throw Exception("Missing arguments")
+                                                        val request =
+                                                            Utility.jsonConfig.decodeFromString(
+                                                                SimCommandRequest.serializer(),
+                                                                arguments
+                                                            )
+                                                        val response = SimCommand.action(request)
+                                                        setFunctionOutput(response.toString())
+                                                        createResponse()
+                                                    }
+                                                    GetBins.tool.name -> {
+                                                        val response = GetBins.action()
+                                                        setFunctionOutput(response.toString())
+                                                        createResponse()
+                                                    }
+                                                    else -> throw Exception("Unknown function: $functionName")
+                                                }
                                             } catch (e: Exception) {
-                                                Timber.e(e)
+                                                Timber.e(e, "Error for ${event.type}")
+                                                try {
+                                                    setFunctionOutput("Error for function $functionName: ${e.localizedMessage}")
+                                                    createResponse()
+                                                } catch (e: Exception) {
+                                                    Timber.e(e)
+                                                }
                                             }
                                         }
                                     }
-                                } else {
-                                    Timber.w("Unknown event: $jsonElement")
+                                    else -> {
+                                        Timber.w("Unknown event: $jsonElement")
+                                    }
                                 }
                             } catch (e: Exception) {
                                 Timber.e(e)
@@ -199,34 +214,47 @@ class OpenAI {
             Timber.e(e)
         }
 
+        // Ensure the WebSocket connection is stopped
         stopWebsocket()
     }
 
+    /**
+     * Stops the WebSocket connection to the OpenAI API.
+     */
     fun stopWebsocket() {
         websocketSession = null
         // Close the client
         client?.close()
         client = null
-        onSessionState(OpenAIState.DISCONNECTED)
+        onSessionState(OpenAISessionState.DISCONNECTED)
 
         Timber.i("Disconnected from server.")
     }
 
+    /**
+     * Sends audio input data to the WebSocket connection.
+     *
+     * @param base64Data The audio data encoded in Base64 format.
+     */
     fun sendInputAudioToWebsocket(base64Data: String) {
         backgroundCoroutineScope.launch {
             val event = ClientInputAudioBufferAppend(
                 audio = base64Data
             )
-            val jsonString = jsonConfig.encodeToString(ClientInputAudioBufferAppend.serializer(), event)
+            val jsonString = Utility.jsonConfig.encodeToString(ClientInputAudioBufferAppend.serializer(), event)
             websocketSession?.send(jsonString)
         }
     }
 
     // MARK: - Utils
+
+    /**
+     * Requests a response from the OpenAI API.
+     */
     private suspend fun createResponse() {
-        // request a response
+        // Request a response
         val response = ClientResponseCreate()
-        val jsonStringResponse = jsonConfig.encodeToString(
+        val jsonStringResponse = Utility.jsonConfig.encodeToString(
             ClientResponseCreate.serializer(),
             response
         )

@@ -28,7 +28,7 @@ class Http {
             url: String,
             headers: Map<String, String> = emptyMap(),
             body: Map<String, Any>? = null
-        ): T = withContext(Dispatchers.IO) {
+        ): T = withContext(Dispatchers.IO + Utility.coroutineExceptionHandler) {
             // url encode url
 //            val url = URLEncoder.encode(url, StandardCharsets.UTF_8.toString())
             val tag = "$method $url"
@@ -96,12 +96,7 @@ class Http {
                 } else if (rawResponse.isNullOrEmpty()) {
                     throw Exception("No data was returned.")
                 } else {
-                    val jsonConfig = Json {
-                        encodeDefaults = true
-                        ignoreUnknownKeys = true
-                        explicitNulls = false
-                    }
-                    val data = jsonConfig.decodeFromString<T>(rawResponse)
+                    val data = Utility.jsonConfig.decodeFromString<T>(rawResponse)
                     return@withContext data
                 }
             } catch (e: Exception) {

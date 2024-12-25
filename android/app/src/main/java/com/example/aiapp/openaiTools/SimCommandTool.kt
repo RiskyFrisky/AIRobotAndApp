@@ -1,8 +1,8 @@
 package com.example.aiapp.openaiTools
 
 import com.example.aiapp.apiHost
-import com.example.aiapp.models.SimCommandResponse
-import com.example.aiapp.models.Tool
+import com.example.aiapp.models.api.SimCommandResponse
+import com.example.aiapp.models.openai.Tool
 import com.example.aiapp.utility.HttpMethod
 import com.example.aiapp.utility.Http
 import com.example.aiapp.utility.toJsonObject
@@ -30,6 +30,12 @@ class SimCommand {
             ).toJsonObject()
         )
 
+        // make a HTTP POST /simcommand to send a simulation command
+        /**
+         * 1 = spawn cube
+         * 2 = stop robot
+         * 3 = start robot
+         */
         suspend fun action(request: SimCommandRequest): SimCommandResponse {
             val body = mapOf(
                 "command" to request.command
