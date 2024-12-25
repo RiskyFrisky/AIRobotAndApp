@@ -1,6 +1,6 @@
 # Extension Project Template
 
-- NOTE: the main code is located in `exts/company.hello.world`
+- NOTE: the main code is located in `exts/company.hello.world/company/hello/world`
 
 This project was automatically generated.
 
