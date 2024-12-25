@@ -3,15 +3,15 @@
 - [What is it](#what-is-it)
 - [How it works](#how-it-works)
 - [Running the application](#running-the-application)
-    - [Testing environment](#testing-environment)
-  - [Robot](#robot)
-  - [Android](#android)
-  - [Troubleshooting](#troubleshooting)
+		- [Testing environment](#testing-environment)
+	- [Robot](#robot)
+	- [Android](#android)
+	- [Troubleshooting](#troubleshooting)
 - [How the Isaac Sim scene was set up](#how-the-isaac-sim-scene-was-set-up)
 - [Github Copilot usage](#github-copilot-usage)
-  - [Robot](#robot-1)
-  - [Android](#android-1)
-  - [Most commonly used Copilot features](#most-commonly-used-copilot-features)
+	- [Robot](#robot-1)
+	- [Android](#android-1)
+	- [Most commonly used Copilot features](#most-commonly-used-copilot-features)
 
 # What is it
 A robot pick and place simulation built in Isaac Sim. Use an Android app to interact with the simulation using your natural language.
@@ -54,10 +54,10 @@ isaac_python main.py
 ```
 6. The first time you run the app, you'll need to install the Foxglove extension manually b/c it is an untrusted extension + you'll need to fix a bug
 	1. Install the Foxglove extension
-        ![Untitled 1.png](docs/images/Untitled%201.png)
-	2. On step 6 of the image, you'll need to open the extension in VSCode
-	3. Open `foxglove/tools/ws_bridge/data_collection.py`
-	4. In the class `DataCollector`, function `def add_sensor(self, prim : Prim, cam_width = 128, cam_height = 128, tf = False):`, add a try-catch block for this block of code
+        1. ![Untitled.png](docs/images/Untitled.png)
+      	2. On step 6 of the image, you'll need to open the extension in VSCode
+	2. Open `foxglove/tools/ws_bridge/data_collection.py`
+	3. In the class `DataCollector`, function `def add_sensor(self, prim : Prim, cam_width = 128, cam_height = 128, tf = False):`, add a try-catch block for this block of code
 ```python
 if prim_type != "invalid":
 	try:
@@ -70,7 +70,7 @@ if prim_type != "invalid":
 	except Exception as e:
 		print(f"An unexpected error occurred: {e}")
 ```
-7. NOTE: The app should already be running, but each time you start the application you'll always need to restart it in order for the connection Foxglove to work.
+1. NOTE: The app should already be running, but each time you start the application you'll always need to restart it in order for the connection Foxglove to work.
 ## Android
 1. Open the `android` project in Android Studio.
 2. Open `Constants.kt` and replace the values.
